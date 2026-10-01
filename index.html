@@ -1,0 +1,1464 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fingertip Fizz</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+  /* Layout: the live 3D scene fills the screen; one floating card sits bottom-left, a score strip runs along the top during play.
+     Single dark look on purpose: glowing soap-film bubbles need a dark room. */
+  :root {
+    --ink: #090c1b;
+    --ink-raised: rgba(14, 18, 40, 0.8);
+    --fg: #eef0ff;
+    --muted: #a3a9cf;
+    --line: rgba(222, 228, 255, 0.16);
+    --film-cyan: #66e3ff;
+    --film-magenta: #ff72d6;
+    --film-gold: #ffd45e;
+    --mine: #ff5a4f;
+    --font-display: "Bricolage Grotesque", "Trebuchet MS", system-ui, sans-serif;
+    --font-body: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--fg);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.45;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  #stage {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+    cursor: crosshair;
+  }
+  #stage.dragging { cursor: grabbing; }
+
+  /* ---------- floating card ---------- */
+  .card {
+    position: fixed;
+    left: max(16px, env(safe-area-inset-left, 0px));
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    width: min(27rem, calc(100% - 32px));
+    max-height: calc(100% - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    overflow: auto;
+    box-sizing: border-box;
+    padding: 1.5rem 1.5rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.95rem;
+    background: var(--ink-raised);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  }
+  @media (min-width: 760px) {
+    .card { left: 40px; bottom: calc(40px + env(safe-area-inset-bottom, 0px)); }
+  }
+  .card > * { margin: 0; }
+  .eyebrow {
+    font: 500 0.72rem/1.2 var(--font-mono);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .title {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: clamp(2.6rem, 10vw, 3.9rem);
+    line-height: 0.92;
+    letter-spacing: -0.035em;
+    text-wrap: balance;
+    background: linear-gradient(100deg, var(--film-cyan) 0%, #b7b0ff 40%, var(--film-magenta) 64%, var(--film-gold) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    padding-bottom: 0.06em;
+  }
+  .lede { font-size: 1.02rem; max-width: 34ch; }
+  .rules {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .rules li {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.38rem 0.75rem 0.38rem 0.45rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 0.92rem;
+    white-space: nowrap;
+  }
+  .rules b { font-family: var(--font-mono); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .swatch { width: 18px; height: 18px; border-radius: 50%; flex: none; }
+  .swatch-film {
+    background:
+      radial-gradient(circle at 34% 30%, rgba(255, 255, 255, 0.95) 0 9%, transparent 14%),
+      radial-gradient(circle, transparent 46%, rgba(102, 227, 255, 0.9) 70%, rgba(255, 114, 214, 0.95) 100%);
+  }
+  .swatch-gold {
+    background:
+      radial-gradient(circle at 34% 30%, #fff 0 9%, transparent 14%),
+      radial-gradient(circle, rgba(255, 212, 94, 0.25) 40%, var(--film-gold) 100%);
+  }
+  .swatch-mine {
+    background: radial-gradient(circle, #ffb38a 0 22%, var(--mine) 48%, rgba(255, 90, 79, 0.2) 72%, transparent 74%);
+    box-shadow: 0 0 0 2px rgba(255, 90, 79, 0.35);
+  }
+  .note { font-size: 0.9rem; color: var(--muted); }
+  .actions { display: flex; flex-wrap: wrap; gap: 0.6rem; padding-top: 0.2rem; }
+  .btn {
+    font: 700 1rem/1 var(--font-body);
+    padding: 0.9rem 1.2rem;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--fg);
+    cursor: pointer;
+    transition: transform 120ms ease, border-color 120ms ease, background-color 120ms ease;
+  }
+  .btn:hover { border-color: rgba(222, 228, 255, 0.45); }
+  .btn:active { transform: scale(0.97); }
+  .btn:focus-visible { outline: 2px solid var(--film-gold); outline-offset: 3px; }
+  .btn-primary {
+    background: linear-gradient(100deg, var(--film-cyan), #b7b0ff 55%, var(--film-magenta));
+    border-color: transparent;
+    color: var(--ink);
+  }
+  .status { font-size: 0.88rem; color: var(--muted); border-top: 1px solid var(--line); padding-top: 0.8rem; }
+  .status strong { color: var(--fg); }
+  .best { font: 500 0.85rem/1.2 var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+  .final { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+  .final-num {
+    font: 800 clamp(3.4rem, 14vw, 5rem)/0.9 var(--font-display);
+    letter-spacing: -0.04em;
+    font-variant-numeric: tabular-nums;
+  }
+  .final-unit { font-size: 1.1rem; color: var(--muted); }
+  .badge {
+    align-self: flex-start;
+    font: 700 0.75rem/1 var(--font-mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink);
+    background: var(--film-gold);
+    padding: 0.4rem 0.6rem;
+    border-radius: 6px;
+  }
+
+  /* ---------- in-game strip (flat screens only; glasses get an in-world panel) ---------- */
+  .hud {
+    position: fixed;
+    top: calc(14px + env(safe-area-inset-top, 0px));
+    left: max(16px, env(safe-area-inset-left, 0px));
+    right: max(16px, env(safe-area-inset-right, 0px));
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    pointer-events: none;
+  }
+  .hud-cell { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+  .hud-cell.mid { align-items: center; }
+  .hud-cell.end { align-items: flex-end; }
+  .hud-label {
+    font: 500 0.7rem/1 var(--font-mono);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .hud-num {
+    font: 700 clamp(1.7rem, 6vw, 2.6rem)/1 var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    transition: color 160ms ease;
+  }
+  .hud-num.dim { color: var(--muted); opacity: 0.55; }
+  .hud-num.hot { color: var(--film-gold); }
+  .hud-num.low { color: var(--mine); }
+  .hud.hit #hudScore { color: var(--mine); }
+  .hint {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+    font: 500 0.78rem/1.3 var(--font-mono);
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    text-align: center;
+    width: max-content;
+    max-width: calc(100% - 32px);
+    pointer-events: none;
+  }
+  body.in-xr .card, body.in-xr .hud, body.in-xr .hint { display: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .btn, .hud-num { transition: none; }
+  }
+</style>
+
+</head>
+<body>
+<canvas id="stage" aria-label="Game view: floating bubbles"></canvas>
+
+<header class="hud" id="hud" hidden>
+  <div class="hud-cell"><span class="hud-label">Score</span><span class="hud-num" id="hudScore">0</span></div>
+  <div class="hud-cell mid"><span class="hud-label">Combo</span><span class="hud-num dim" id="hudCombo">×1</span></div>
+  <div class="hud-cell end"><span class="hud-label">Time</span><span class="hud-num" id="hudTime">1:00</span></div>
+</header>
+<p class="hint" id="hint" hidden>Click or tap bubbles · drag to look around</p>
+
+<section class="card" id="menuCard" aria-labelledby="gameTitle">
+  <p class="eyebrow">Hand-tracked AR · Android XR glasses</p>
+  <h1 class="title" id="gameTitle">Fingertip Fizz</h1>
+  <p class="lede">Bubbles drift around you for 60 seconds. On glasses, pop them with your fingertips or pinch to pop one further away. On a screen, click or tap.</p>
+  <ul class="rules" aria-label="Scoring">
+    <li><span class="swatch swatch-film" aria-hidden="true"></span>Bubble <b>+1</b></li>
+    <li><span class="swatch swatch-gold" aria-hidden="true"></span>Gold <b>+5</b></li>
+    <li><span class="swatch swatch-mine" aria-hidden="true"></span>Red spiky <b>−5</b></li>
+  </ul>
+  <p class="note">Pop bubbles less than 1.4 seconds apart to build a combo, up to ×5 points.</p>
+  <div class="actions">
+    <button class="btn btn-primary" id="btnXR" type="button" hidden>Start in AR</button>
+    <button class="btn" id="btnFlat" type="button">Play on this screen</button>
+  </div>
+  <p class="status" id="status" role="status">Checking for AR glasses…</p>
+  <p class="best" id="bestLine">Best score: 0</p>
+</section>
+
+<section class="card" id="overCard" aria-labelledby="overTitle" hidden>
+  <p class="eyebrow" id="overTitle">Time's up</p>
+  <p class="final"><span class="final-num" id="finalScore">0</span><span class="final-unit">points</span></p>
+  <p class="badge" id="newBest" hidden>New best</p>
+  <p class="best" id="finalBest">Best score: 0</p>
+  <div class="actions">
+    <button class="btn btn-primary" id="btnAgain" type="button">Play again</button>
+    <button class="btn" id="btnMenu" type="button">Back to start</button>
+  </div>
+</section>
+
+<script>
+(function () {
+'use strict';
+
+/* =====================================================================
+   Fingertip Fizz — a hand-tracked WebXR bubble game.
+   Plain WebGL2 + WebXR, no libraries. Units are metres, Y is up,
+   -Z is forward. In AR the reference space is 'local' (origin near the
+   head at session start).
+   ===================================================================== */
+
+/* ---------------- small math helpers ---------------- */
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const rand = (a, b) => a + Math.random() * (b - a);
+const lerp = (a, b, t) => a + (b - a) * t;
+const vlerp = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+const vdist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+const vnorm = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+const easeOutBack = (t) => { const c1 = 1.70158, c3 = c1 + 1, u = t - 1; return 1 + c3 * u * u * u + c1 * u * u; };
+const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+
+function quatRotate(q, v) {
+  const qx = q[0], qy = q[1], qz = q[2], qw = q[3];
+  const tx = 2 * (qy * v[2] - qz * v[1]);
+  const ty = 2 * (qz * v[0] - qx * v[2]);
+  const tz = 2 * (qx * v[1] - qy * v[0]);
+  return [
+    v[0] + qw * tx + (qy * tz - qz * ty),
+    v[1] + qw * ty + (qz * tx - qx * tz),
+    v[2] + qw * tz + (qx * ty - qy * tx),
+  ];
+}
+function quatFromYawPitch(yaw, pitch) {
+  const cy = Math.cos(yaw / 2), sy = Math.sin(yaw / 2), cp = Math.cos(pitch / 2), sp = Math.sin(pitch / 2);
+  return [cy * sp, sy * cp, -sy * sp, cy * cp];
+}
+function quatAxisAngle(axis, ang) {
+  const s = Math.sin(ang / 2);
+  return [axis[0] * s, axis[1] * s, axis[2] * s, Math.cos(ang / 2)];
+}
+function quatToMat3(q) {
+  const [x, y, z, w] = q;
+  const xx = x * x, yy = y * y, zz = z * z, xy = x * y, xz = x * z, yz = y * z, wx = w * x, wy = w * y, wz = w * z;
+  // column-major
+  return new Float32Array([
+    1 - 2 * (yy + zz), 2 * (xy + wz), 2 * (xz - wy),
+    2 * (xy - wz), 1 - 2 * (xx + zz), 2 * (yz + wx),
+    2 * (xz + wy), 2 * (yz - wx), 1 - 2 * (xx + yy),
+  ]);
+}
+function viewMatrix(pos, q) {
+  const r = quatToMat3(q); // columns of R
+  // view = R^T * T(-pos); rows of R^T are columns of R
+  const m = new Float32Array(16);
+  m[0] = r[0]; m[4] = r[1]; m[8] = r[2];
+  m[1] = r[3]; m[5] = r[4]; m[9] = r[5];
+  m[2] = r[6]; m[6] = r[7]; m[10] = r[8];
+  m[12] = -(r[0] * pos[0] + r[1] * pos[1] + r[2] * pos[2]);
+  m[13] = -(r[3] * pos[0] + r[4] * pos[1] + r[5] * pos[2]);
+  m[14] = -(r[6] * pos[0] + r[7] * pos[1] + r[8] * pos[2]);
+  m[15] = 1;
+  return m;
+}
+function perspective(fovy, aspect, near, far) {
+  const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+  const m = new Float32Array(16);
+  m[0] = f / aspect; m[5] = f; m[10] = (far + near) * nf; m[11] = -1; m[14] = 2 * far * near * nf;
+  return m;
+}
+function randDir() {
+  const u = Math.random() * 2 - 1, a = Math.random() * Math.PI * 2, s = Math.sqrt(1 - u * u);
+  return [s * Math.cos(a), u, s * Math.sin(a)];
+}
+
+/* ---------------- DOM ---------------- */
+const $ = (id) => document.getElementById(id);
+const canvas = $('stage');
+const ui = {
+  menu: $('menuCard'), over: $('overCard'), hud: $('hud'), hint: $('hint'),
+  status: $('status'), best: $('bestLine'), btnXR: $('btnXR'), btnFlat: $('btnFlat'),
+  btnAgain: $('btnAgain'), btnMenu: $('btnMenu'),
+  finalScore: $('finalScore'), finalBest: $('finalBest'), newBest: $('newBest'),
+  hudScore: $('hudScore'), hudCombo: $('hudCombo'), hudTime: $('hudTime'),
+};
+const setStatus = (html) => { ui.status.innerHTML = html; };
+
+/* ---------------- best score (per-browser convenience) ---------------- */
+const BEST_KEY = 'fingertip-fizz-best';
+function loadBest() { try { return parseInt(localStorage.getItem(BEST_KEY) || '0', 10) || 0; } catch (e) { return 0; } }
+function saveBest(v) { try { localStorage.setItem(BEST_KEY, String(v)); } catch (e) { /* storage unavailable */ } }
+
+/* ---------------- sound (synthesised, no files) ---------------- */
+const Sound = (() => {
+  let ctx = null, master = null, noiseBuf = null;
+  function init() {
+    if (ctx) { if (ctx.state === 'suspended') ctx.resume().catch(() => {}); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try {
+      ctx = new AC();
+      master = ctx.createGain(); master.gain.value = 0.55; master.connect(ctx.destination);
+      noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.4, ctx.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    } catch (e) { ctx = null; }
+  }
+  function tone(freq, freqEnd, dur, type, vol, delay) {
+    if (!ctx) return;
+    const t = ctx.currentTime + (delay || 0);
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (freqEnd) o.frequency.exponentialRampToValueAtTime(freqEnd, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t + dur + 0.03);
+  }
+  function noise(dur, vol, freq) {
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    const s = ctx.createBufferSource(); s.buffer = noiseBuf;
+    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = 0.9;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(f); f.connect(g); g.connect(master);
+    s.start(t); s.stop(t + dur + 0.02);
+  }
+  return {
+    init,
+    pop(combo) { const f = 470 * Math.pow(1.122, Math.max(0, combo - 1)); tone(f, f * 0.42, 0.11, 'sine', 0.38); noise(0.035, 0.14, 3200); },
+    gold() { tone(988, null, 0.12, 'triangle', 0.26); tone(1319, null, 0.18, 'triangle', 0.26, 0.07); tone(1976, null, 0.24, 'sine', 0.14, 0.14); },
+    mine() { tone(150, 55, 0.38, 'sawtooth', 0.22); noise(0.22, 0.2, 420); },
+    start() { [523, 659, 784, 1047].forEach((f, i) => tone(f, null, 0.15, 'triangle', 0.22, i * 0.07)); },
+    end() { [784, 659, 523, 392].forEach((f, i) => tone(f, null, 0.2, 'triangle', 0.22, i * 0.1)); },
+    tick() { tone(1250, null, 0.045, 'square', 0.05); },
+    soft() { tone(640, 300, 0.09, 'sine', 0.2); noise(0.03, 0.06, 2600); },
+  };
+})();
+
+/* ---------------- WebGL2 setup ---------------- */
+const gl = canvas.getContext('webgl2', { xrCompatible: true, alpha: true, antialias: true, premultipliedAlpha: true });
+if (!gl) {
+  setStatus('<strong>This browser can’t draw 3D graphics (WebGL2 is off).</strong> Try an up-to-date Chrome.');
+  ui.btnFlat.disabled = true;
+  return;
+}
+
+function program(vs, fs) {
+  const p = gl.createProgram();
+  for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    gl.attachShader(p, s);
+  }
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {};
+  const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) {
+    const info = gl.getActiveUniform(p, i);
+    u[info.name] = gl.getUniformLocation(p, info.name);
+  }
+  return { p, u };
+}
+
+// Soap-film bubble: fresnel rim + thin-film interference colours + one specular glint.
+const progBubble = program(`#version 300 es
+layout(location=0) in vec3 aPos;
+uniform mat4 uProj; uniform mat4 uView;
+uniform vec3 uCenter; uniform float uRadius; uniform float uTime; uniform float uSeed; uniform float uWobble;
+out vec3 vN; out vec3 vW;
+void main() {
+  vec3 n = aPos;
+  float w = 1.0 + uWobble * 0.022 * sin(uTime * 5.0 + n.y * 3.0 + uSeed * 7.0) * sin(uTime * 3.7 + n.x * 2.5 + uSeed * 3.0);
+  vec3 wp = uCenter + n * uRadius * w;
+  vN = n; vW = wp;
+  gl_Position = uProj * uView * vec4(wp, 1.0);
+}`, `#version 300 es
+precision highp float;
+in vec3 vN; in vec3 vW;
+uniform vec3 uCam; uniform vec3 uTint; uniform float uTintMix; uniform float uAlpha; uniform float uTime; uniform float uSeed;
+out vec4 o;
+void main() {
+  vec3 N = normalize(vN);
+  vec3 V = normalize(uCam - vW);
+  float ndv = abs(dot(N, V));
+  float f = pow(1.0 - ndv, 2.2);
+  float h = f * 1.4 + uSeed + uTime * 0.06 + N.y * 0.3;
+  vec3 film = 0.55 + 0.45 * cos(6.2831 * (h + vec3(0.0, 0.33, 0.67)));
+  vec3 col = mix(film, uTint, uTintMix);
+  vec3 L = normalize(vec3(-0.45, 0.8, 0.55));
+  float spec = pow(max(dot(N, normalize(L + V)), 0.0), 70.0);
+  vec3 c = col * (0.05 + 1.3 * f) + vec3(spec) * 1.2;
+  o = vec4(c * uAlpha, clamp((0.08 + 0.9 * f + spec) * uAlpha, 0.0, 1.0));
+}`);
+
+// Spiky core of the red "mine" bubbles. Drawn opaque.
+const progSpike = program(`#version 300 es
+layout(location=0) in vec3 aPos; layout(location=1) in vec3 aNrm;
+uniform mat4 uProj; uniform mat4 uView; uniform vec3 uCenter; uniform float uRadius; uniform mat3 uRot;
+out vec3 vN; out vec3 vW;
+void main() {
+  vN = uRot * aNrm;
+  vW = uCenter + (uRot * aPos) * uRadius;
+  gl_Position = uProj * uView * vec4(vW, 1.0);
+}`, `#version 300 es
+precision highp float;
+in vec3 vN; in vec3 vW;
+uniform vec3 uCam; uniform float uPulse;
+out vec4 o;
+void main() {
+  vec3 N = normalize(vN); vec3 V = normalize(uCam - vW);
+  vec3 L = normalize(vec3(-0.45, 0.8, 0.55));
+  float d = max(dot(N, L), 0.0);
+  float rim = pow(1.0 - abs(dot(N, V)), 2.0);
+  vec3 base = vec3(1.0, 0.2, 0.17); vec3 hot = vec3(1.0, 0.62, 0.3);
+  vec3 c = base * (0.3 + 0.7 * d) + hot * rim * 0.9 + base * uPulse * 0.35;
+  o = vec4(c, 1.0);
+}`);
+
+// Camera-facing quads, instanced: particles, rings, fingertip dots, dust.
+const progBB = program(`#version 300 es
+layout(location=0) in vec2 aCorner;
+layout(location=1) in vec4 iPosSize;
+layout(location=2) in vec4 iColor;
+layout(location=3) in float iShape;
+uniform mat4 uProj; uniform mat4 uView;
+out vec2 vUv; out vec4 vCol; out float vShape;
+void main() {
+  vec4 vp = uView * vec4(iPosSize.xyz, 1.0);
+  vp.xy += aCorner * iPosSize.w;
+  gl_Position = uProj * vp;
+  vUv = aCorner; vCol = iColor; vShape = iShape;
+}`, `#version 300 es
+precision mediump float;
+in vec2 vUv; in vec4 vCol; in float vShape;
+out vec4 o;
+void main() {
+  float d = length(vUv);
+  if (d > 1.0) discard;
+  float a;
+  if (vShape < 0.5) { a = 1.0 - d; a = a * a * (1.0 + 2.0 * step(d, 0.35)); }
+  else { a = smoothstep(0.16, 0.0, abs(d - 0.84)); }
+  a *= vCol.a;
+  o = vec4(vCol.rgb * a, clamp(a, 0.0, 1.0));
+}`);
+
+// Text panels drawn from canvas textures (premultiplied alpha).
+const progText = program(`#version 300 es
+layout(location=0) in vec2 aCorner;
+uniform mat4 uProj; uniform mat4 uView; uniform vec3 uCenter; uniform vec2 uHalf;
+out vec2 vUv;
+void main() {
+  vec4 vp = uView * vec4(uCenter, 1.0);
+  vp.xy += aCorner * uHalf;
+  gl_Position = uProj * vp;
+  vUv = vec2(aCorner.x * 0.5 + 0.5, 0.5 - aCorner.y * 0.5);
+}`, `#version 300 es
+precision mediump float;
+in vec2 vUv; uniform sampler2D uTex; uniform float uOpacity;
+out vec4 o;
+void main() { o = texture(uTex, vUv) * uOpacity; }`);
+
+/* ---------------- geometry ---------------- */
+function buildSphere(seg, rings) {
+  const pos = [], idx = [];
+  for (let y = 0; y <= rings; y++) {
+    const v = y / rings, th = v * Math.PI;
+    for (let x = 0; x <= seg; x++) {
+      const u = x / seg, ph = u * Math.PI * 2;
+      pos.push(Math.sin(th) * Math.cos(ph), Math.cos(th), Math.sin(th) * Math.sin(ph));
+    }
+  }
+  for (let y = 0; y < rings; y++) for (let x = 0; x < seg; x++) {
+    const a = y * (seg + 1) + x, b = a + seg + 1;
+    idx.push(a, b, a + 1, b, b + 1, a + 1);
+  }
+  return { pos: new Float32Array(pos), idx: new Uint16Array(idx) };
+}
+function buildSpikeBall() {
+  const t = (1 + Math.sqrt(5)) / 2;
+  const V = [[-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0], [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t], [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1]].map((v) => vnorm(v).map((c) => c * 0.62));
+  const F = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8], [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]];
+  const out = [];
+  const tri = (a, b, c) => {
+    const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    const n = vnorm([u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]]);
+    for (const p of [a, b, c]) out.push(p[0], p[1], p[2], n[0], n[1], n[2]);
+  };
+  for (const [i, j, k] of F) {
+    const a = V[i], b = V[j], c = V[k];
+    const apex = vnorm([a[0] + b[0] + c[0], a[1] + b[1] + c[1], a[2] + b[2] + c[2]]);
+    tri(a, b, apex); tri(b, c, apex); tri(c, a, apex);
+  }
+  return new Float32Array(out);
+}
+
+const sphere = buildSphere(32, 20);
+const vaoSphere = gl.createVertexArray();
+gl.bindVertexArray(vaoSphere);
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+gl.bufferData(gl.ARRAY_BUFFER, sphere.pos, gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.createBuffer());
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, sphere.idx, gl.STATIC_DRAW);
+
+const spikeData = buildSpikeBall();
+const spikeCount = spikeData.length / 6;
+const vaoSpike = gl.createVertexArray();
+gl.bindVertexArray(vaoSpike);
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+gl.bufferData(gl.ARRAY_BUFFER, spikeData, gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0);
+gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 24, 12);
+
+const quadVBO = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+
+const BB_MAX = 2048, BB_STRIDE = 9;
+const bbData = new Float32Array(BB_MAX * BB_STRIDE);
+const bbVBO = gl.createBuffer();
+const vaoBB = gl.createVertexArray();
+gl.bindVertexArray(vaoBB);
+gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+gl.bindBuffer(gl.ARRAY_BUFFER, bbVBO);
+gl.bufferData(gl.ARRAY_BUFFER, bbData.byteLength, gl.DYNAMIC_DRAW);
+gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.FLOAT, false, BB_STRIDE * 4, 0); gl.vertexAttribDivisor(1, 1);
+gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.FLOAT, false, BB_STRIDE * 4, 16); gl.vertexAttribDivisor(2, 1);
+gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.FLOAT, false, BB_STRIDE * 4, 32); gl.vertexAttribDivisor(3, 1);
+
+const vaoText = gl.createVertexArray();
+gl.bindVertexArray(vaoText);
+gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+gl.bindVertexArray(null);
+
+/* ---------------- text textures (canvas 2D -> GL) ---------------- */
+const F_DISPLAY = '"Bricolage Grotesque", "Trebuchet MS", system-ui, sans-serif';
+const F_BODY = '"Atkinson Hyperlegible", system-ui, sans-serif';
+const F_MONO = '"JetBrains Mono", ui-monospace, Menlo, Consolas, monospace';
+const C = { fg: '#eef0ff', muted: '#a3a9cf', cyan: '#66e3ff', magenta: '#ff72d6', gold: '#ffd45e', mine: '#ff5a4f' };
+
+function makeTex(w, h) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  return { c, ctx: c.getContext('2d'), tex: gl.createTexture(), w, h, aspect: w / h, key: null };
+}
+function upload(t) {
+  gl.bindTexture(gl.TEXTURE_2D, t.tex);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, t.c);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+}
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+function filmGradient(ctx, x0, x1) {
+  const g = ctx.createLinearGradient(x0, 0, x1, 0);
+  g.addColorStop(0, C.cyan); g.addColorStop(0.4, '#b7b0ff'); g.addColorStop(0.64, C.magenta); g.addColorStop(1, C.gold);
+  return g;
+}
+function panelBacking(ctx, w, h) {
+  roundRect(ctx, 6, 6, w - 12, h - 12, Math.min(48, h / 4));
+  ctx.fillStyle = 'rgba(9, 12, 27, 0.6)'; ctx.fill();
+  ctx.lineWidth = 3; ctx.strokeStyle = filmGradient(ctx, 0, w); ctx.globalAlpha = 0.6; ctx.stroke(); ctx.globalAlpha = 1;
+}
+function ruleChip(ctx, x, y, color, label, pts) {
+  ctx.beginPath(); ctx.arc(x + 16, y, 15, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+  ctx.fillStyle = C.fg; ctx.font = `400 36px ${F_BODY}`; ctx.textAlign = 'left';
+  ctx.fillText(label, x + 44, y + 2);
+  const w = ctx.measureText(label).width;
+  ctx.font = `700 36px ${F_MONO}`; ctx.fillText(pts, x + 44 + w + 12, y + 2);
+  return x + 44 + w + 12 + ctx.measureText(pts).width;
+}
+
+const texHUD = makeTex(1024, 200);
+const texPanel = makeTex(1024, 540);
+const texLabel = { START: makeTex(512, 150), AGAIN: makeTex(512, 150) };
+const popupCache = new Map();
+
+function paintHUD(score, combo, secs) {
+  const key = `${score}|${combo}|${secs}`;
+  if (texHUD.key === key) return;
+  texHUD.key = key;
+  const { ctx, w, h } = texHUD;
+  ctx.clearRect(0, 0, w, h);
+  panelBacking(ctx, w, h);
+  ctx.textBaseline = 'middle';
+  ctx.font = `500 28px ${F_MONO}`; ctx.fillStyle = C.muted;
+  ctx.textAlign = 'left'; ctx.fillText('SCORE', 56, 60);
+  ctx.textAlign = 'center'; ctx.fillText('COMBO', w / 2, 60);
+  ctx.textAlign = 'right'; ctx.fillText('TIME', w - 56, 60);
+  ctx.font = `700 76px ${F_MONO}`;
+  ctx.textAlign = 'left'; ctx.fillStyle = C.fg; ctx.fillText(String(score), 56, 132);
+  ctx.textAlign = 'center'; ctx.fillStyle = combo > 1 ? C.gold : 'rgba(163,169,207,0.55)'; ctx.fillText('×' + Math.max(1, combo), w / 2, 132);
+  ctx.textAlign = 'right'; ctx.fillStyle = secs <= 10 ? C.mine : C.fg;
+  ctx.fillText(`${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`, w - 56, 132);
+  upload(texHUD);
+}
+function paintPanel(kind) {
+  const key = `${kind}|${G.score}|${G.best}|${G.newBest}|${fontsVersion}`;
+  if (texPanel.key === key) return;
+  texPanel.key = key;
+  const { ctx, w, h } = texPanel;
+  ctx.clearRect(0, 0, w, h);
+  panelBacking(ctx, w, h);
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+  if (kind === 'menu') {
+    ctx.font = `800 112px ${F_DISPLAY}`; ctx.fillStyle = filmGradient(ctx, 150, w - 150);
+    ctx.fillText('Fingertip Fizz', w / 2, 118);
+    ctx.font = `700 42px ${F_BODY}`; ctx.fillStyle = C.fg;
+    ctx.fillText('Touch the bubble below to start', w / 2, 228);
+    // rules row, centred
+    ctx.font = `400 36px ${F_BODY}`;
+    let x = 92;
+    x = ruleChip(ctx, x, 318, C.cyan, 'Bubble', '+1') + 40;
+    x = ruleChip(ctx, x, 318, C.gold, 'Gold', '+5') + 40;
+    ruleChip(ctx, x, 318, C.mine, 'Red spiky', '−5');
+    ctx.textAlign = 'center'; ctx.font = `400 33px ${F_BODY}`; ctx.fillStyle = C.muted;
+    ctx.fillText('Pinch to pop bubbles out of reach. Quick pops build a combo.', w / 2, 404);
+    ctx.fillText('You have 60 seconds.', w / 2, 452);
+  } else {
+    ctx.font = `800 84px ${F_DISPLAY}`; ctx.fillStyle = filmGradient(ctx, 300, w - 300);
+    ctx.fillText('Time’s up', w / 2, 100);
+    ctx.font = `700 150px ${F_MONO}`; ctx.fillStyle = C.fg;
+    ctx.fillText(String(G.score), w / 2, 238);
+    ctx.font = `700 40px ${F_MONO}`;
+    ctx.fillStyle = G.newBest ? C.gold : C.muted;
+    ctx.fillText(G.newBest ? 'NEW BEST' : `BEST ${G.best}`, w / 2, 350);
+    ctx.font = `400 36px ${F_BODY}`; ctx.fillStyle = C.muted;
+    ctx.fillText('Touch the bubble below to play again', w / 2, 446);
+  }
+  upload(texPanel);
+}
+function paintLabel(word) {
+  const t = texLabel[word];
+  if (t.key === fontsVersion) return t;
+  t.key = fontsVersion;
+  const { ctx, w, h } = t;
+  ctx.clearRect(0, 0, w, h);
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+  ctx.font = `800 104px ${F_DISPLAY}`;
+  ctx.lineWidth = 10; ctx.strokeStyle = 'rgba(9,12,27,0.55)'; ctx.strokeText(word, w / 2, h / 2 + 4);
+  ctx.fillStyle = C.fg; ctx.fillText(word, w / 2, h / 2 + 4);
+  upload(t);
+  return t;
+}
+function popupTex(text, color) {
+  const key = text + color;
+  let t = popupCache.get(key);
+  if (t && t.key === fontsVersion) return t;
+  if (!t) { t = makeTex(256, 128); popupCache.set(key, t); }
+  t.key = fontsVersion;
+  const { ctx, w, h } = t;
+  ctx.clearRect(0, 0, w, h);
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+  ctx.font = `700 84px ${F_MONO}`;
+  ctx.lineWidth = 8; ctx.strokeStyle = 'rgba(9,12,27,0.5)'; ctx.strokeText(text, w / 2, h / 2 + 4);
+  ctx.fillStyle = color; ctx.fillText(text, w / 2, h / 2 + 4);
+  upload(t);
+  return t;
+}
+let fontsVersion = 0;
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(() => { fontsVersion++; texHUD.key = null; texPanel.key = null; });
+  Promise.all([
+    document.fonts.load(`800 100px ${F_DISPLAY}`), document.fonts.load(`700 40px ${F_BODY}`),
+    document.fonts.load(`400 40px ${F_BODY}`), document.fonts.load(`700 80px ${F_MONO}`), document.fonts.load(`500 28px ${F_MONO}`),
+  ]).then(() => { fontsVersion++; texHUD.key = null; texPanel.key = null; }).catch(() => {});
+}
+
+/* ---------------- game state ---------------- */
+const REDUCED_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const ROUND_SECONDS = 60;
+const COMBO_WINDOW = 1.4;
+const FILM = [[0.45, 0.9, 1.0], [1.0, 0.48, 0.86], [1.0, 0.84, 0.4], [0.75, 0.72, 1.0], [0.9, 1.0, 1.0]];
+
+const G = {
+  mode: 'menu',          // menu | playing | over
+  clock: 0,              // game clock in seconds (pauses when the headset blurs the session)
+  roundT: 0,
+  score: 0, best: loadBest(), newBest: false,
+  combo: 0, lastPop: -99,
+  spawnAcc: 0, lastTick: -1,
+  overAt: 0, againSpawned: false,
+  bubbles: [], parts: [], popups: [],
+  hit: 0,
+};
+const head = { pos: [0, 0, 0], quat: [0, 0, 0, 1] };
+const desk = { yaw: 0, pitch: 0, fovy: 1.08, aspect: 1 };
+const menuPlace = { yaw: 0, base: [0, 0, 0], panel: [0, 0.1, -0.85], offFor: 0 };
+const hudPos = [0, 0.25, -1];
+let joints = [];  // [x, y, z, radius] for every tracked hand joint / controller grip
+let tips = [];    // fingertip positions, drawn as small glowing dots
+let rays = [];    // controller target rays {o, d}
+let xr = null;    // active XR session info
+let xrMode = null;
+let seq = 0;
+
+const sizeScale = () => (xr ? 1 : 1.5);
+function headFwd() { return quatRotate(head.quat, [0, 0, -1]); }
+function headYaw() { const f = headFwd(); return Math.atan2(-f[0], -f[2]); }
+const yawDir = (a) => [-Math.sin(a), 0, -Math.cos(a)];
+function angleDiff(a, b) { let d = a - b; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; }
+
+function spawnSpot(kind) {
+  const inXR = !!xr;
+  const yaw = headYaw();
+  let spread, dmin, dmax, ylo, yhi;
+  if (inXR) {
+    // within arm's reach, chest to eye height, in front of the player
+    spread = 0.95; dmin = 0.36; dmax = 0.66; ylo = -0.36; yhi = 0.1;
+  } else {
+    const hHalf = Math.atan(Math.tan(desk.fovy / 2) * desk.aspect);
+    spread = hHalf * 0.7; dmin = 0.85; dmax = 1.3;
+    const v = Math.tan(desk.fovy / 2) * 0.55; ylo = -v; yhi = v * 0.75;
+  }
+  if (kind === 'ambient') { dmin = inXR ? 0.7 : 1.4; dmax = inXR ? 1.3 : 2.6; spread *= 1.1; }
+  const S = sizeScale();
+  let best = null;
+  for (let tries = 0; tries < 10; tries++) {
+    const a = yaw + rand(-spread, spread);
+    const d = rand(dmin, dmax);
+    const dir = yawDir(a);
+    const yOff = inXR ? rand(ylo, yhi) : (Math.tan(desk.pitch) + rand(ylo, yhi)) * d;
+    const p = [head.pos[0] + dir[0] * d, head.pos[1] + yOff, head.pos[2] + dir[2] * d];
+    let ok = true;
+    for (const b of G.bubbles) if (!b.dead && vdist(b.pos, p) < b.r + 0.09 * S) { ok = false; break; }
+    best = p;
+    if (ok) break;
+  }
+  return best;
+}
+
+function makeBubble(kind, pos) {
+  const S = sizeScale();
+  const b = { id: ++seq, kind, anchor: pos.slice(), pos: pos.slice(), born: G.clock, seed: Math.random(), scale: 0, alpha: 0, dying: false, dieAt: 0, dead: false };
+  const p = G.roundT / ROUND_SECONDS;
+  switch (kind) {
+    case 'gold':    Object.assign(b, { r: 0.04 * S, life: 3.4, amp: 0.07 * S, freq: 2.1, tint: [1.0, 0.8, 0.28], tintMix: 0.72, wobble: 0.6 }); break;
+    case 'mine':    Object.assign(b, { r: 0.05 * S, life: 6.5, amp: 0.015 * S, freq: 0.8, tint: [1.0, 0.25, 0.22], tintMix: 0.85, wobble: 0.3 }); break;
+    case 'start':   Object.assign(b, { r: 0.08 * S, life: Infinity, amp: 0.01 * S, freq: 0.7, tint: [0.6, 0.92, 1.0], tintMix: 0.12, wobble: 1 }); break;
+    case 'ambient': Object.assign(b, { r: rand(0.05, 0.1) * S, life: rand(8, 12), amp: (REDUCED_MOTION ? 0.015 : 0.04) * S, freq: 0.6, tint: [0.7, 0.9, 1.0], tintMix: 0.1, wobble: 1 }); break;
+    default:        Object.assign(b, { r: rand(0.045, 0.072) * S, life: lerp(7.5, 5.0, p), amp: 0.022 * S, freq: 1, tint: [0.6, 0.9, 1.0], tintMix: 0.12, wobble: 1 });
+  }
+  G.bubbles.push(b);
+  return b;
+}
+const poppable = (b) => !b.dead && !b.dying && G.clock - b.born > 0.22;
+function fadeAll() { for (const b of G.bubbles) if (!b.dying) { b.dying = true; b.dieAt = G.clock; } }
+
+function burst(b) {
+  const S = sizeScale();
+  const R = b.r * Math.max(0.5, b.scale);
+  const n = b.kind === 'gold' ? 28 : b.kind === 'mine' ? 24 : b.kind === 'start' ? 30 : 16;
+  for (let i = 0; i < n; i++) {
+    const d = randDir();
+    const sp = rand(0.22, 0.65) * S * (b.kind === 'mine' ? 1.3 : 1);
+    let col;
+    if (b.kind === 'mine') col = Math.random() < 0.5 ? [1, 0.3, 0.22] : [1, 0.66, 0.3];
+    else if (b.kind === 'gold') col = Math.random() < 0.6 ? [1, 0.84, 0.4] : [1, 1, 0.9];
+    else col = FILM[i % FILM.length];
+    G.parts.push({ p: [b.pos[0] + d[0] * R, b.pos[1] + d[1] * R, b.pos[2] + d[2] * R], v: [d[0] * sp, d[1] * sp, d[2] * sp], age: 0, life: rand(0.35, 0.75), size: rand(0.005, 0.011) * S, col, shape: 0 });
+  }
+  G.parts.push({ p: b.pos.slice(), v: [0, 0, 0], age: 0, life: 0.36, size: R, grow: R * 1.9, col: b.kind === 'mine' ? [1, 0.32, 0.25] : b.kind === 'gold' ? [1, 0.86, 0.45] : [0.8, 0.95, 1], shape: 1 });
+}
+function popup(text, pos, color) {
+  G.popups.push({ text, color, p: pos.slice(), born: G.clock });
+}
+
+function pop(b, how) {
+  if (!b || b.dead || b.dying) return;
+  b.dead = true;
+  burst(b);
+  if (b.kind === 'start') { startRound(); return; }
+  if (b.kind === 'ambient') { Sound.soft(); return; }
+  if (G.mode !== 'playing') return;
+  if (b.kind === 'mine') {
+    G.score = Math.max(0, G.score - 5);
+    G.combo = 0; G.lastPop = -99; G.hit = 0.35;
+    Sound.mine();
+    popup('−5', b.pos, C.mine);
+    return;
+  }
+  G.combo = G.clock - G.lastPop < COMBO_WINDOW ? Math.min(G.combo + 1, 5) : 1;
+  G.lastPop = G.clock;
+  const pts = (b.kind === 'gold' ? 5 : 1) * G.combo;
+  G.score += pts;
+  if (b.kind === 'gold') Sound.gold(); else Sound.pop(G.combo);
+  popup('+' + pts, b.pos, b.kind === 'gold' ? C.gold : G.combo > 1 ? '#c9f6ff' : C.fg);
+}
+
+function raycast(o, d, slack) {
+  let hit = null, bestT = Infinity;
+  for (const b of G.bubbles) {
+    if (!poppable(b)) continue;
+    const R = b.r * b.scale * (slack || 1.25);
+    const oc = [o[0] - b.pos[0], o[1] - b.pos[1], o[2] - b.pos[2]];
+    const bq = oc[0] * d[0] + oc[1] * d[1] + oc[2] * d[2];
+    const c = oc[0] * oc[0] + oc[1] * oc[1] + oc[2] * oc[2] - R * R;
+    const disc = bq * bq - c;
+    if (disc < 0) continue;
+    const t = -bq - Math.sqrt(disc);
+    const tt = t > 0 ? t : -bq + Math.sqrt(disc);
+    if (tt > 0 && tt < bestT && tt < 6) { bestT = tt; hit = b; }
+  }
+  return hit;
+}
+
+/* ---------------- flow ---------------- */
+function placeMenu() {
+  menuPlace.yaw = headYaw();
+  menuPlace.base = head.pos.slice();
+  menuPlace.offFor = 0;
+}
+function menuSpots() {
+  const d = yawDir(menuPlace.yaw), b = menuPlace.base;
+  return {
+    bubble: [b[0] + d[0] * 0.48, b[1] - 0.13, b[2] + d[2] * 0.48],
+    panel: [b[0] + d[0] * 0.85, b[1] + 0.1, b[2] + d[2] * 0.85],
+  };
+}
+function enterMenu() {
+  G.mode = 'menu';
+  fadeAll();
+  if (xr) {
+    placeMenu();
+    const s = menuSpots();
+    menuPlace.panel = s.panel.slice();
+    makeBubble('start', s.bubble);
+  } else {
+    showCard('menu');
+  }
+}
+function startRound() {
+  Sound.init();
+  fadeAll();
+  Object.assign(G, { mode: 'playing', roundT: 0, score: 0, combo: 0, lastPop: -99, spawnAcc: 0.45, lastTick: -1, newBest: false, hit: 0 });
+  Sound.start();
+  if (xr) {
+    const f = headFwd();
+    hudPos[0] = head.pos[0] + f[0]; hudPos[1] = head.pos[1] + 0.2; hudPos[2] = head.pos[2] + f[2];
+  } else {
+    showCard('playing');
+  }
+}
+function endRound() {
+  G.mode = 'over';
+  G.overAt = G.clock;
+  G.againSpawned = false;
+  G.newBest = G.score > G.best;
+  if (G.newBest) { G.best = G.score; saveBest(G.best); }
+  fadeAll();
+  Sound.end();
+  if (xr) {
+    placeMenu();
+    menuPlace.panel = menuSpots().panel;
+  } else {
+    showCard('over');
+  }
+}
+
+function update(dt) {
+  G.clock += dt;
+  const S = sizeScale();
+
+  // round timer + spawning
+  if (G.mode === 'playing') {
+    G.roundT += dt;
+    const remain = ROUND_SECONDS - G.roundT;
+    const sec = Math.ceil(remain);
+    if (remain > 0 && remain <= 5 && sec !== G.lastTick) { G.lastTick = sec; Sound.tick(); }
+    if (remain <= 0) endRound();
+    else {
+      const p = G.roundT / ROUND_SECONDS;
+      const interval = lerp(0.85, 0.38, p);
+      const alive = G.bubbles.filter((b) => !b.dead && !b.dying).length;
+      G.spawnAcc += dt;
+      if (G.spawnAcc >= interval && alive < (xr ? 12 : 14)) {
+        G.spawnAcc = 0;
+        const r = Math.random();
+        const kind = G.roundT > 12 && r < 0.17 ? 'mine' : r < 0.27 ? 'gold' : 'normal';
+        makeBubble(kind, spawnSpot(kind));
+      }
+    }
+  } else if (!xr) {
+    // flat-screen attract mode: a few drifting bubbles you can pop for fun
+    const ambient = G.bubbles.filter((b) => b.kind === 'ambient' && !b.dead && !b.dying).length;
+    if (ambient < 7 && Math.random() < dt * 2.5) makeBubble('ambient', spawnSpot('ambient'));
+  } else {
+    // glasses: keep the start panel in view; re-centre it if the player looks away for a while
+    const off = Math.abs(angleDiff(headYaw(), menuPlace.yaw));
+    menuPlace.offFor = off > 0.85 ? menuPlace.offFor + dt : 0;
+    if (menuPlace.offFor > 1.3) {
+      placeMenu();
+      const s = menuSpots();
+      for (const b of G.bubbles) if (b.kind === 'start' && !b.dying && !b.dead) b.anchor = s.bubble;
+    }
+    const target = menuSpots().panel;
+    const k = 1 - Math.exp(-dt * 5);
+    menuPlace.panel = vlerp(menuPlace.panel, target, k);
+    if (G.mode === 'over' && !G.againSpawned && G.clock - G.overAt > 1.4) {
+      G.againSpawned = true;
+      makeBubble('start', menuSpots().bubble).label = 'AGAIN';
+    }
+  }
+
+  // bubbles
+  for (const b of G.bubbles) {
+    if (b.dead) continue;
+    const age = G.clock - b.born;
+    const c = age * b.freq;
+    if (b.kind !== 'start') b.anchor[1] += 0.005 * dt;
+    b.pos[0] = b.anchor[0] + Math.sin(c * 1.3 + b.seed * 9) * b.amp;
+    b.pos[1] = b.anchor[1] + Math.sin(c * 1.7 + b.seed * 17) * b.amp * 0.7;
+    b.pos[2] = b.anchor[2] + Math.cos(c * 1.1 + b.seed * 29) * b.amp;
+    const grow = clamp(age / 0.4, 0, 1);
+    b.scale = easeOutBack(grow);
+    b.alpha = Math.min(1, grow * 1.6);
+    if (!b.dying && age > b.life) { b.dying = true; b.dieAt = G.clock; }
+    if (b.dying) {
+      const k = clamp((G.clock - b.dieAt) / 0.45, 0, 1);
+      b.scale *= 1 - 0.35 * k;
+      b.alpha *= 1 - k;
+      if (k >= 1) b.dead = true;
+    }
+  }
+
+  // touch: any tracked joint inside a bubble pops it
+  if (joints.length) {
+    for (const b of G.bubbles) {
+      if (!poppable(b)) continue;
+      const R = b.r * b.scale;
+      for (const j of joints) {
+        const dx = j[0] - b.pos[0], dy = j[1] - b.pos[1], dz = j[2] - b.pos[2];
+        const rr = R + j[3];
+        if (dx * dx + dy * dy + dz * dz < rr * rr) { pop(b, 'touch'); break; }
+      }
+    }
+  }
+  G.bubbles = G.bubbles.filter((b) => !b.dead);
+
+  // particles
+  for (const p of G.parts) {
+    p.age += dt;
+    const drag = Math.exp(-dt * 2.4);
+    p.v[0] *= drag; p.v[1] = p.v[1] * drag - 0.35 * S * dt; p.v[2] *= drag;
+    p.p[0] += p.v[0] * dt; p.p[1] += p.v[1] * dt; p.p[2] += p.v[2] * dt;
+  }
+  G.parts = G.parts.filter((p) => p.age < p.life);
+  G.popups = G.popups.filter((p) => G.clock - p.born < 0.95);
+  G.hit = Math.max(0, G.hit - dt);
+
+  // in-world HUD lazily follows the gaze
+  if (xr && G.mode === 'playing') {
+    const f = headFwd(), up = quatRotate(head.quat, [0, 1, 0]);
+    const target = [head.pos[0] + f[0] * 1.0 + up[0] * 0.2, head.pos[1] + f[1] * 1.0 + up[1] * 0.2, head.pos[2] + f[2] * 1.0 + up[2] * 0.2];
+    const k = 1 - Math.exp(-dt * 3.5);
+    const np = vlerp(hudPos, target, k);
+    hudPos[0] = np[0]; hudPos[1] = np[1]; hudPos[2] = np[2];
+  }
+  if (!xr) updateDomHud();
+}
+
+/* ---------------- flat-screen UI ---------------- */
+function showCard(which) {
+  ui.menu.hidden = which !== 'menu';
+  ui.over.hidden = which !== 'over';
+  ui.hud.hidden = which !== 'playing';
+  ui.hint.hidden = which !== 'playing';
+  ui.best.textContent = `Best score: ${G.best}`;
+  if (which === 'over') {
+    ui.finalScore.textContent = String(G.score);
+    ui.finalBest.textContent = `Best score: ${G.best}`;
+    ui.newBest.hidden = !G.newBest;
+    setTimeout(() => { if (!ui.over.hidden) ui.btnAgain.focus({ preventScroll: true }); }, 50);
+  }
+}
+const domHud = { score: -1, combo: -1, secs: -1, hit: false };
+function liveCombo() { return G.clock - G.lastPop < COMBO_WINDOW ? G.combo : 0; }
+function updateDomHud() {
+  if (G.mode !== 'playing') return;
+  const secs = Math.max(0, Math.ceil(ROUND_SECONDS - G.roundT));
+  const combo = liveCombo();
+  if (domHud.score !== G.score) { domHud.score = G.score; ui.hudScore.textContent = String(G.score); }
+  if (domHud.combo !== combo) {
+    domHud.combo = combo;
+    ui.hudCombo.textContent = '×' + Math.max(1, combo);
+    ui.hudCombo.classList.toggle('dim', combo <= 1);
+    ui.hudCombo.classList.toggle('hot', combo > 1);
+  }
+  if (domHud.secs !== secs) {
+    domHud.secs = secs;
+    ui.hudTime.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+    ui.hudTime.classList.toggle('low', secs <= 10);
+  }
+  const hit = G.hit > 0;
+  if (domHud.hit !== hit) { domHud.hit = hit; ui.hud.classList.toggle('hit', hit); }
+}
+
+/* ---------------- rendering ---------------- */
+const INK = [9 / 255, 12 / 255, 27 / 255];
+const DUST = Array.from({ length: 220 }, () => {
+  const d = randDir(), r = rand(3, 8);
+  const c = FILM[Math.floor(Math.random() * FILM.length)];
+  return { p: [d[0] * r, d[1] * r * 0.7, d[2] * r], s: rand(0.012, 0.03), c, tw: rand(0.4, 1.4), ph: rand(0, 6.28) };
+});
+let bbN = 0;
+function bb(x, y, z, s, r, g, b, a, shape) {
+  if (bbN >= BB_MAX) return;
+  const o = bbN * BB_STRIDE;
+  bbData[o] = x; bbData[o + 1] = y; bbData[o + 2] = z; bbData[o + 3] = s;
+  bbData[o + 4] = r; bbData[o + 5] = g; bbData[o + 6] = b; bbData[o + 7] = a; bbData[o + 8] = shape;
+  bbN++;
+}
+function buildBillboards(opaqueBackdrop) {
+  bbN = 0;
+  if (opaqueBackdrop) {
+    for (const d of DUST) {
+      const tw = 0.5 + 0.5 * Math.sin(G.clock * d.tw + d.ph);
+      bb(d.p[0], d.p[1], d.p[2], d.s, d.c[0], d.c[1], d.c[2], 0.18 + 0.3 * tw, 0);
+    }
+  }
+  for (const p of G.parts) {
+    const k = 1 - p.age / p.life;
+    if (p.shape === 1) {
+      const s = p.size + p.grow * easeOutCubic(p.age / p.life);
+      bb(p.p[0], p.p[1], p.p[2], s, p.col[0], p.col[1], p.col[2], k * 0.9, 1);
+    } else {
+      bb(p.p[0], p.p[1], p.p[2], p.size * (0.5 + 0.5 * k), p.col[0], p.col[1], p.col[2], k, 0);
+    }
+  }
+  for (const t of tips) bb(t[0], t[1], t[2], 0.011, 0.55, 0.95, 1, 0.95, 0);
+  for (const r of rays) {
+    for (let i = 1; i <= 16; i++) {
+      const d = i * 0.045;
+      bb(r.o[0] + r.d[0] * d, r.o[1] + r.d[1] * d, r.o[2] + r.d[2] * d, 0.0045, 0.7, 0.92, 1, 0.55 * (1 - i / 17), 0);
+    }
+  }
+  if (!bbN) return;
+  gl.bindBuffer(gl.ARRAY_BUFFER, bbVBO);
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, bbData, 0, bbN * BB_STRIDE);
+}
+
+const textDraws = [];
+function queueText(tex, center, halfH, opacity) {
+  textDraws.push({ tex, center, halfW: halfH * tex.aspect, halfH, opacity });
+}
+function buildTextQueue() {
+  textDraws.length = 0;
+  const S = sizeScale();
+  for (const p of G.popups) {
+    const k = clamp((G.clock - p.born) / 0.95, 0, 1);
+    const t = popupTex(p.text, p.color);
+    const op = k < 0.55 ? 1 : 1 - (k - 0.55) / 0.45;
+    queueText(t, [p.p[0], p.p[1] + 0.02 * S + 0.07 * S * easeOutCubic(k), p.p[2]], 0.022 * S, op);
+  }
+  for (const b of G.bubbles) {
+    if (b.kind === 'start' && !b.dead) queueText(paintLabel(b.label || 'START'), b.pos, 0.016, b.alpha);
+  }
+  if (xr) {
+    if (G.mode === 'playing') {
+      paintHUD(G.score, liveCombo(), Math.max(0, Math.ceil(ROUND_SECONDS - G.roundT)));
+      queueText(texHUD, hudPos.slice(), 0.038, 1);
+    } else {
+      paintPanel(G.mode === 'over' ? 'over' : 'menu');
+      const op = G.mode === 'over' ? clamp((G.clock - G.overAt) / 0.5, 0, 1) : 1;
+      queueText(texPanel, menuPlace.panel, 0.105, op);
+    }
+  }
+}
+
+let mineRotCache = new Map();
+const I3 = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
+function drawScene(proj, view, cam) {
+  // 1) opaque spiky cores of the red bubbles
+  gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL);
+  gl.disable(gl.BLEND); gl.depthMask(true); gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK);
+  gl.useProgram(progSpike.p);
+  gl.uniformMatrix4fv(progSpike.u.uProj, false, proj);
+  gl.uniformMatrix4fv(progSpike.u.uView, false, view);
+  gl.uniform3fv(progSpike.u.uCam, cam);
+  gl.uniform1f(progSpike.u.uPulse, 0.5 + 0.5 * Math.sin(G.clock * 7));
+  gl.bindVertexArray(vaoSpike);
+  for (const b of G.bubbles) {
+    if (b.kind !== 'mine' || b.dead) continue;
+    gl.uniform3fv(progSpike.u.uCenter, b.pos);
+    gl.uniform1f(progSpike.u.uRadius, b.r * b.scale * Math.max(0.001, b.alpha));
+    gl.uniformMatrix3fv(progSpike.u.uRot, false, mineRotCache.get(b.id) || I3);
+    gl.drawArrays(gl.TRIANGLES, 0, spikeCount);
+  }
+
+  // 2) bubbles, additive (glowing light on see-through glasses)
+  gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE); gl.depthMask(false); gl.disable(gl.CULL_FACE);
+  gl.useProgram(progBubble.p);
+  gl.uniformMatrix4fv(progBubble.u.uProj, false, proj);
+  gl.uniformMatrix4fv(progBubble.u.uView, false, view);
+  gl.uniform3fv(progBubble.u.uCam, cam);
+  gl.uniform1f(progBubble.u.uTime, G.clock);
+  gl.bindVertexArray(vaoSphere);
+  for (const b of G.bubbles) {
+    if (b.dead || b.alpha <= 0.001) continue;
+    const isMine = b.kind === 'mine';
+    gl.uniform3fv(progBubble.u.uCenter, b.pos);
+    gl.uniform1f(progBubble.u.uRadius, b.r * b.scale * (isMine ? 1.3 : 1));
+    gl.uniform1f(progBubble.u.uSeed, b.seed);
+    gl.uniform1f(progBubble.u.uWobble, b.wobble);
+    gl.uniform3fv(progBubble.u.uTint, b.tint);
+    gl.uniform1f(progBubble.u.uTintMix, b.tintMix);
+    gl.uniform1f(progBubble.u.uAlpha, b.alpha * (isMine ? 0.55 : b.kind === 'ambient' ? 0.7 : 1));
+    gl.drawElements(gl.TRIANGLES, sphere.idx.length, gl.UNSIGNED_SHORT, 0);
+  }
+
+  // 3) particles, rings, fingertip dots, dust
+  if (bbN) {
+    gl.useProgram(progBB.p);
+    gl.uniformMatrix4fv(progBB.u.uProj, false, proj);
+    gl.uniformMatrix4fv(progBB.u.uView, false, view);
+    gl.bindVertexArray(vaoBB);
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, bbN);
+  }
+
+  // 4) text, always on top
+  if (textDraws.length) {
+    gl.disable(gl.DEPTH_TEST);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.useProgram(progText.p);
+    gl.uniformMatrix4fv(progText.u.uProj, false, proj);
+    gl.uniformMatrix4fv(progText.u.uView, false, view);
+    gl.uniform1i(progText.u.uTex, 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindVertexArray(vaoText);
+    for (const t of textDraws) {
+      if (t.opacity <= 0.001) continue;
+      gl.bindTexture(gl.TEXTURE_2D, t.tex.tex);
+      gl.uniform3fv(progText.u.uCenter, t.center);
+      gl.uniform2f(progText.u.uHalf, t.halfW, t.halfH);
+      gl.uniform1f(progText.u.uOpacity, t.opacity);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+  }
+  gl.bindVertexArray(null);
+  gl.depthMask(true);
+}
+function prepareFrame(opaqueBackdrop) {
+  mineRotCache = new Map();
+  for (const b of G.bubbles) {
+    if (b.kind === 'mine') mineRotCache.set(b.id, quatToMat3(quatAxisAngle(vnorm([0.3, 1, 0.25]), G.clock * 1.3 + b.seed * 6)));
+  }
+  buildBillboards(opaqueBackdrop);
+  buildTextQueue();
+}
+
+/* ---------------- flat-screen loop ---------------- */
+let deskRAF = 0, deskLast = 0;
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(1, Math.round(canvas.clientWidth * dpr)), h = Math.max(1, Math.round(canvas.clientHeight * dpr));
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  desk.aspect = w / h;
+  // keep at least ~50 degrees of horizontal view on tall phone screens
+  desk.fovy = clamp(Math.max(1.08, 2 * Math.atan(Math.tan(0.44) / desk.aspect)), 1.08, 1.65);
+}
+function deskFrame(t) {
+  if (xr) { deskRAF = 0; return; }
+  deskRAF = requestAnimationFrame(deskFrame);
+  const dt = deskLast ? clamp((t - deskLast) / 1000, 0, 0.05) : 0.016;
+  deskLast = t;
+  resize();
+  head.pos = [0, 0, 0];
+  head.quat = quatFromYawPitch(desk.yaw, desk.pitch);
+  joints = []; tips = []; rays = [];
+  update(dt);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  prepareFrame(true);
+  gl.clearColor(INK[0], INK[1], INK[2], 1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  drawScene(perspective(desk.fovy, desk.aspect, 0.02, 60), viewMatrix(head.pos, head.quat), head.pos);
+}
+function startDeskLoop() { if (!deskRAF && !xr) { deskLast = 0; deskRAF = requestAnimationFrame(deskFrame); } }
+
+function pickAt(clientX, clientY) {
+  const r = canvas.getBoundingClientRect();
+  const nx = ((clientX - r.left) / r.width) * 2 - 1;
+  const ny = -(((clientY - r.top) / r.height) * 2 - 1);
+  const th = Math.tan(desk.fovy / 2);
+  const dir = quatRotate(head.quat, vnorm([nx * th * desk.aspect, ny * th, -1]));
+  return raycast(head.pos, dir, 1.35);
+}
+let drag = null;
+canvas.addEventListener('pointerdown', (e) => {
+  if (xr) return;
+  Sound.init();
+  const hit = pickAt(e.clientX, e.clientY);
+  if (hit) { pop(hit, 'click'); return; }
+  drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  canvas.classList.add('dragging');
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!drag || drag.id !== e.pointerId) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  drag.x = e.clientX; drag.y = e.clientY;
+  desk.yaw = clamp(desk.yaw - dx * 0.005, -1.2, 1.2);
+  desk.pitch = clamp(desk.pitch - dy * 0.005, -0.6, 0.6);
+});
+for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+  canvas.addEventListener(type, (e) => { if (drag && drag.id === e.pointerId) { drag = null; canvas.classList.remove('dragging'); } });
+}
+
+/* ---------------- WebXR ---------------- */
+const TIP_NAMES = ['thumb-tip', 'index-finger-tip', 'middle-finger-tip', 'ring-finger-tip', 'pinky-finger-tip'];
+
+async function startXR() {
+  if (!xrMode || xr) return;
+  Sound.init();
+  ui.btnXR.disabled = true;
+  let session;
+  try {
+    session = await navigator.xr.requestSession(xrMode, { optionalFeatures: ['hand-tracking'] });
+  } catch (e) {
+    ui.btnXR.disabled = false;
+    setStatus(`<strong>AR didn’t start.</strong> ${escapeHtml(e && e.message ? e.message : String(e))}`);
+    return;
+  }
+  try {
+    // the context was created xrCompatible; this call is a belt-and-braces extra, so a failure here is not fatal
+    if (gl.makeXRCompatible) { try { await gl.makeXRCompatible(); } catch (e) { /* layer creation below reports real problems */ } }
+    session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl, { antialias: true, alpha: true }), depthNear: 0.02, depthFar: 100 });
+    const ref = await session.requestReferenceSpace('local');
+    xr = {
+      session, ref, lastT: 0, needsMenu: true,
+      blend: session.environmentBlendMode || (xrMode === 'immersive-ar' ? 'alpha-blend' : 'opaque'),
+    };
+  } catch (e) {
+    ui.btnXR.disabled = false;
+    setStatus(`<strong>AR didn’t start.</strong> ${escapeHtml(e && e.message ? e.message : String(e))}`);
+    try { await session.end(); } catch (err) { /* already ended */ }
+    return;
+  }
+  document.body.classList.add('in-xr');
+  if (deskRAF) { cancelAnimationFrame(deskRAF); deskRAF = 0; }
+  G.bubbles = []; G.parts = []; G.popups = [];
+  session.addEventListener('end', onXREnd);
+  session.addEventListener('select', onXRSelect);
+  session.requestAnimationFrame(xrFrame);
+}
+function onXREnd() {
+  xr = null;
+  ui.btnXR.disabled = false;
+  document.body.classList.remove('in-xr');
+  G.bubbles = []; G.parts = []; G.popups = [];
+  joints = []; tips = []; rays = [];
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  enterMenu();
+  startDeskLoop();
+}
+function onXRSelect(e) {
+  if (!xr) return;
+  const pose = e.frame.getPose(e.inputSource.targetRaySpace, xr.ref);
+  if (!pose) return;
+  const o = pose.transform.position, q = pose.transform.orientation;
+  const hit = raycast([o.x, o.y, o.z], quatRotate([q.x, q.y, q.z, q.w], [0, 0, -1]), 1.3);
+  if (hit) {
+    pop(hit, 'select');
+    const act = e.inputSource.gamepad && e.inputSource.gamepad.hapticActuators && e.inputSource.gamepad.hapticActuators[0];
+    if (act && act.pulse) act.pulse(0.6, 40).catch(() => {});
+  }
+}
+function readInputs(frame) {
+  joints = []; tips = []; rays = [];
+  for (const src of xr.session.inputSources) {
+    if (src.hand && frame.getJointPose) {
+      for (const space of src.hand.values()) {
+        const jp = frame.getJointPose(space, xr.ref);
+        if (jp) { const p = jp.transform.position; joints.push([p.x, p.y, p.z, jp.radius || 0.008]); }
+      }
+      for (const name of TIP_NAMES) {
+        const sp = src.hand.get(name);
+        const jp = sp && frame.getJointPose(sp, xr.ref);
+        if (jp) { const p = jp.transform.position; tips.push([p.x, p.y, p.z]); }
+      }
+    } else if (src.targetRayMode === 'tracked-pointer') {
+      const rp = frame.getPose(src.targetRaySpace, xr.ref);
+      if (rp) {
+        const o = rp.transform.position, q = rp.transform.orientation;
+        rays.push({ o: [o.x, o.y, o.z], d: quatRotate([q.x, q.y, q.z, q.w], [0, 0, -1]) });
+      }
+      if (src.gripSpace) {
+        const gp = frame.getPose(src.gripSpace, xr.ref);
+        if (gp) { const p = gp.transform.position; joints.push([p.x, p.y, p.z, 0.035]); }
+      }
+    }
+  }
+}
+function xrFrame(t, frame) {
+  if (!xr) return;
+  const session = frame.session;
+  session.requestAnimationFrame(xrFrame);
+  const dt = xr.lastT ? clamp((t - xr.lastT) / 1000, 0, 0.05) : 0.016;
+  xr.lastT = t;
+  const pose = frame.getViewerPose(xr.ref);
+  if (!pose) return;
+  const p = pose.transform.position, o = pose.transform.orientation;
+  head.pos = [p.x, p.y, p.z];
+  head.quat = [o.x, o.y, o.z, o.w];
+  readInputs(frame);
+  if (xr.needsMenu) { xr.needsMenu = false; enterMenu(); }
+  const paused = session.visibilityState && session.visibilityState !== 'visible';
+  if (!paused) update(dt);
+
+  const layer = session.renderState.baseLayer;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+  const opaque = xr.blend === 'opaque';
+  prepareFrame(opaque);
+  if (opaque) gl.clearColor(INK[0], INK[1], INK[2], 1); else gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  for (const view of pose.views) {
+    const vp = layer.getViewport(view);
+    gl.viewport(vp.x, vp.y, vp.width, vp.height);
+    const tp = view.transform.position;
+    drawScene(view.projectionMatrix, view.transform.inverse.matrix, [tp.x, tp.y, tp.z]);
+  }
+}
+
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+const MSG_FRAMED = '<strong>AR can’t start inside this preview window.</strong> To play in your glasses, open the standalone game file in Chrome on the XREAL Aura. You can still play here with a mouse or touchscreen.';
+async function detectXR() {
+  let framed = false;
+  try { framed = window.self !== window.top; } catch (e) { framed = true; }
+  if (!('xr' in navigator) || !navigator.xr) {
+    setStatus(framed ? MSG_FRAMED : '<strong>This browser can’t start AR.</strong> Open this page in Chrome on your XREAL Aura to play in AR. You can still play here with a mouse or touchscreen.');
+    return;
+  }
+  try {
+    const fp = document.permissionsPolicy || document.featurePolicy;
+    if (fp && fp.allowsFeature && !fp.allowsFeature('xr-spatial-tracking')) { setStatus(MSG_FRAMED); return; }
+  } catch (e) { /* ignore */ }
+  let ar = false, vr = false;
+  try { ar = await navigator.xr.isSessionSupported('immersive-ar'); }
+  catch (e) { if (e && e.name === 'SecurityError') { setStatus(MSG_FRAMED); return; } }
+  if (!ar) { try { vr = await navigator.xr.isSessionSupported('immersive-vr'); } catch (e) { /* ignore */ } }
+  if (ar) {
+    xrMode = 'immersive-ar';
+    ui.btnXR.textContent = 'Start in AR';
+    ui.btnXR.hidden = false;
+    setStatus('<strong>AR is ready.</strong> Press Start in AR, then touch the floating bubble to begin.');
+  } else if (vr) {
+    xrMode = 'immersive-vr';
+    ui.btnXR.textContent = 'Start in VR';
+    ui.btnXR.hidden = false;
+    setStatus('<strong>VR headset found.</strong> Press Start in VR, then touch the floating bubble to begin.');
+  } else {
+    setStatus(framed ? MSG_FRAMED : '<strong>No AR glasses found on this device.</strong> Open this page in Chrome on your XREAL Aura to play in AR. You can still play here with a mouse or touchscreen.');
+  }
+}
+
+/* ---------------- buttons + boot ---------------- */
+ui.btnXR.addEventListener('click', startXR);
+ui.btnFlat.addEventListener('click', () => { Sound.init(); startRound(); });
+ui.btnAgain.addEventListener('click', () => { Sound.init(); startRound(); });
+ui.btnMenu.addEventListener('click', () => enterMenu());
+
+function boot(data) {
+  if (data && typeof data.best === 'number' && data.best > G.best) G.best = data.best;
+  resize();
+  enterMenu();
+  // seed the attract scene so the first frame already has bubbles in it
+  for (let i = 0; i < 6; i++) { const b = makeBubble('ambient', spawnSpot('ambient')); b.born -= rand(0.5, 3); }
+  startDeskLoop();
+  detectXR();
+}
+
+// test/debug handle (read-only use)
+window.__fizz = {
+  G, head, desk,
+  get xr() { return xr; },
+  project(p) {
+    const r = canvas.getBoundingClientRect();
+    const v = viewMatrix(head.pos, head.quat), P = perspective(desk.fovy, desk.aspect, 0.02, 60);
+    const x = v[0] * p[0] + v[4] * p[1] + v[8] * p[2] + v[12], y = v[1] * p[0] + v[5] * p[1] + v[9] * p[2] + v[13], z = v[2] * p[0] + v[6] * p[1] + v[10] * p[2] + v[14];
+    const cx = (P[0] * x) / -z, cy = (P[5] * y) / -z;
+    return { x: r.left + (cx * 0.5 + 0.5) * r.width, y: r.top + (0.5 - cy * 0.5) * r.height };
+  },
+};
+
+const hot = window.claude && window.claude.hot;
+if (hot && hot.snapshot) { try { hot.snapshot(() => ({ best: G.best })); } catch (e) { /* ignore */ } }
+if (hot && hot.ready) hot.ready(boot); else boot((hot && hot.data) || {});
+})();
+</script>
+</body>
+</html>
